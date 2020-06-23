@@ -4,59 +4,86 @@ const fs = require('fs')
 const game = require('./game')
 
 const express = require('express')
+const koa = require('koa')
+const mount = require('koa-mount')
 
 let playWon = 0
 let playLastAction = null
 let sameCount = 0
 
-const app = express();
+// const app = express();
+const app = new koa()
 
-app.get('/favicon.ico', function (req, res) {
-    res.status(200)
-    return
-})
-app.get('/game',
-    function (req, res, next) { 
-        if (playWon >= 3 || sameCount == 9) { 
-            res.status(500)
-            res.send('我再也不和你玩了')
+app.use(
+    mount('/favicon.ico', function (ctx) { 
+        ctx.status = 200
+    })
+)
+
+// app.get('/favicon.ico', function (req, res) {
+//     res.status(200)
+//     return
+// })
+
+const gameKoa = new koa()
+gameKoa.use(
+    async function (ctx, next) { 
+        if (playWon >= 3) { 
+            ctx.status = 500
+            ctx.body = '我再也不和你玩了'
             // res.writeHead(500)
             // res.end('我再也不和你玩了')
             return
         }
-        next()
-        if (res.playerWon) {
+        await next()
+        if (ctx.playerWon) {
             playWon++
         }
-    },
-    function (req, res, next) { 
-        const parseUrl = url.parse(req.url, true)
+    }
+)
+
+gameKoa.use(
+    async function (ctx, next) { 
+        const parseUrl = url.parse(ctx.url, true)
         const playerAction = parseUrl.query.action
 
         if (playerAction == 'reset'){
             playWon = 0;
             playLastAction = null;
             sameCount = 0;
-            res.status(500);
-            res.send('重来吧！');
+            ctx.status = 500;
+            ctx.body = '重来吧！';
             return
+        }
+
+        if (sameCount == 9) {
+            ctx.status = 500
+            ctx.body = '我不和你玩了'
         }
 
         if (playLastAction && playerAction == playLastAction) {
             sameCount++
+            if (sameCount >= 3) {
+                ctx.status = 500
+                ctx.body = '你耍赖'
+                return
+            }
         } else { 
             sameCount = 0;
         }
 
         playLastAction = playerAction
-        res.playerAction = playerAction
-        next() 
+        ctx.playerAction = playerAction
+       await next() 
     },
-    function (req, res) {
-        const playerAction = res.playerAction
+)
+
+gameKoa.use(
+    async function (ctx, next) {
+        const playerAction = ctx.playerAction
         if (sameCount >= 3) { 
-            res.status(400)
-            res.send('你耍赖')
+            ctx.status = 500
+            ctx.body = '你耍赖'
             // res.writeHead(400)
             // res.end('')
             sameCount = 9
@@ -65,22 +92,32 @@ app.get('/game',
 
         const gameResult = game(playerAction)
         
-        res.status(200)
+        ctx.status = 200
 
         if (gameResult === 0) {
-            res.send('平局')
+            ctx.body = '平局'
         } else if (gameResult === 1) {
-            res.playerWon = true
-            res.send('您赢了')
+            ctx.playerWon = true
+            ctx.body = '您赢了'
         } else { 
-            res.send('你输了')
+            ctx.body = '你输了'
         }
+    }
+)
+
+app.use(mount('/game', gameKoa))
+// app.get('/game',)
+// app.get('/', function (req, res) { 
+//     res.send(fs.readFileSync(__dirname + '/index.html', 'utf-8'))
+//     // fs.createReadStream(__dirname + '/index.html').pipe(res)
+//     // res.writeHead(200)
+// })
+
+app.use(
+    mount('/', function (ctx) { 
+        ctx.body = fs.readFileSync(__dirname + '/index.html', 'utf-8')
     })
-app.get('/', function (req, res) { 
-    res.send(fs.readFileSync(__dirname + '/index.html', 'utf-8'))
-    // fs.createReadStream(__dirname + '/index.html').pipe(res)
-    // res.writeHead(200)
-})
+)
 
 app.listen(8000)
 
